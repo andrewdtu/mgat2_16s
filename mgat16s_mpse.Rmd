@@ -1,0 +1,1082 @@
+---
+title: "mgat16s_mpse"
+author: "Andrew Tu"
+date: "2023-07-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#BiocManager::install(c("phyloseq",'DESeq2'))
+library(tidyverse)
+library(dplyr)
+library(ape)
+library(DESeq2)
+library(lme4)
+library(miLineage)
+library(phangorn)
+library(phyloseq)
+library(vegan)
+library(VennDiagram)
+library(ggpubr)
+library(MicrobiotaProcess)
+library(gghalves)
+library(ggh4x)
+library(ggalluvial)
+library(corrr)
+library(ggthemes)
+library(ggtree)
+library(ggtreeExtra)
+library(ggstar)
+library(randomForest)
+library(ggpp)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r ps import}
+mothur_ps = merge_phyloseq(
+  import_mothur(
+    mothur_shared_file = "stability.final.opti_mcc.shared", 
+    mothur_constaxonomy_file = "stability.final.opti_mcc.0.03.cons.taxonomy"),
+    sample_data(read_csv("metadata.csv")%>%column_to_rownames("Sample_ID")%>%
+                  mutate(geno = case_when(Mogat2 %in% c("flox","IKO") ~ "Intestine",
+                                          Mogat2 %in% c("WT","KO") ~ "Global")))
+  )
+
+nosingleton_ps = mothur_ps%>%
+  filter_taxa(function(x) { sum(x>0) > 1},prune = TRUE)
+
+
+mpse_no1s = as.mpse(nosingleton_ps)
+
+sample_sums(mothur_ps)%>%
+  sort()%>%
+  plot()
+```
+
+```{r rarefact alpha}
+
+
+mpse1 = as.mpse(mothur_ps)%>%
+  #mutate(Tissue = fct_relevel(Tissue, c("Proximal_lumen","Prox_Scraping","Distal_lumen","Distal_Scraping","Cecum")))%>%
+  mutate(Bile_acid = fct_relevel(Bile_acid, c("Low","High")))%>%
+  mutate(BA_M2 = fct_relevel(BA_M2, c("WTL", "KOL", "KOH")))%>%
+  mutate(Tissue = fct_recode(Tissue, 
+                             "Proximal Lumen" = "Proximal_lumen",
+                             "Proximal Scraping" = "Prox_Scraping",
+                             "Distal Lumen" = "Distal_lumen",
+                             "Distal Scraping" = "Distal_Scraping",
+                             "Cecum" = "Cecum"))%>%
+  mutate(Tissue = fct_relevel(Tissue,
+                              "Proximal Lumen",
+                              "Proximal Scraping",
+                              "Distal Lumen",
+                              "Distal Scraping",
+                              "Cecum"))%>%
+  #filter(Mogat2 %in% c("WT","KO"))%>%
+  mp_rrarefy(raresize = 10346, trimOTU = TRUE, trimSample = TRUE)%>%
+  mp_cal_rarecurve()%>%
+  mp_cal_alpha()
+
+mpse2 = mpse1%>%
+
+  mp_cal_abundance(.abundance = RareAbundance)%>%
+  mp_cal_abundance(
+      .abundance=RareAbundance,
+      .group=c("Mogat2","Tissue")
+    )%>%
+  mp_cal_abundance(
+    .abundance=RareAbundance,
+    .group = Bile_acid
+  )%>%
+  mp_decostand(.abundance=Abundance)
+  # mp_cal_dist(.abundance=hellinger, distmethod="bray")%>%
+  # mp_cal_nmds(.abundance = hellinger, distmethod = "bray")%>%
+  # mp_adonis(.abundance=hellinger, .formula=~BA, distmethod="bray", permutations=9999, action="add")%>%
+  # mp_cal_clust(
+  #        .abundance = hellinger,
+  #        distmethod = "bray",
+  #        hclustmethod = "average",
+  #        action = "add"
+  #      )
+
+# mpse_no1s = as.mpse(nosingleton_ps)%>%
+#   mutate(Tissue = fct_recode(Tissue, 
+#                              "Proximal Lumen" = "Proximal_lumen",
+#                              "Proximal Scraping" = "Prox_Scraping",
+#                              "Distal Lumen" = "Distal_lumen",
+#                              "Distal Scraping" = "Distal_Scraping",
+#                              "Cecum" = "Cecum"))%>%
+#   mutate(Bile_acid = fct_relevel(Bile_acid, c("Low","High")))%>%
+#   mutate(Tissue = fct_relevel(Tissue,
+#                               "Proximal Lumen",
+#                               "Proximal Scraping",
+#                               "Distal Lumen",
+#                               "Distal Scraping",
+#                               "Cecum"))%>%
+#   mp_rrarefy()%>%
+#   mp_cal_rarecurve()%>%
+#   mp_cal_alpha()%>%
+#   mp_cal_abundance(.abundance = RareAbundance)%>%
+#   mp_cal_abundance( 
+#       .abundance=RareAbundance,
+#       .group=c("Mogat2","Tissue")
+#     )%>%
+#   mp_cal_abundance(
+#     .abundance=RareAbundance,
+#     .group = Bile_acid
+#   )%>%
+#   mp_decostand(.abundance=Abundance)%>%
+#   mp_cal_dist(.abundance=hellinger, distmethod="bray")%>%
+#   mp_cal_nmds(.abundance = hellinger, distmethod = "bray")%>%
+#   mp_adonis(.abundance=hellinger, .formula=~BA, distmethod="bray", permutations=9999, action="add")%>%
+#   mp_cal_clust(
+#          .abundance = hellinger,
+#          distmethod = "bray",
+#          hclustmethod = "average",
+#          action = "add"
+#        )
+  
+```
+
+```{r rarefact}
+mp_plot_rarecurve(mpse1, .rare = RareAbundanceRarecurve, .alpha = Observe, .group = Tissue, plot.group = TRUE)+
+  ggtitle("Singletons included")
+  #theme(legend.position = "none")+
+  
+
+ggsave("rarefactbytissue.png")
+
+mp_plot_rarecurve(mpse_no1s, .rare = RareAbundanceRarecurve, .alpha = Observe, .group = Tissue, plot.group = TRUE)+
+  ggtitle("Singletons Pruned")
+
+```
+
+```{r mp shannon, fig.height = 6, fig.width = 10}
+#mp_extract_sample(mpse1)
+
+comparisons = list(c("WTL","KOH"), c("WTL", "KOL"), c("KOL", "KOH"))
+# 
+# p1 <- mp_plot_alpha(mpse1, 
+#                     .group = c("BA_M2","Tissue"), 
+#                     .alpha=c("Shannon"), 
+#                     
+#                     
+#                     )+
+#   ggtitle('Shannon Diversity Index (Evenness)')+
+#   scale_fill_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+#   scale_color_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+#   ylim(c(0,5))
+#   # stat_compare_means(
+#   #                    method = "wilcox.test",
+#   #                    step.increase = 1,
+#   #                    comparisons = comparisons,
+#   #                    label.y = c(3, 4, 5))
+#   
+# 
+# p1
+# p1$layers[[2]]$aes_params$size <- 0.8
+# p1$layers[[2]]$aes_params$alpha <- 0.5
+# p1
+# ggsave('figures/shannon.png')
+
+
+ggplot(mpse1, aes(x = BA_M2, y = Shannon, color = BA_M2, group = BA_M2))+
+  geom_half_violin(side = "l", aes(fill = BA_M2))+
+  geom_boxplot(position = position_nudge(x = 0.22), width=0.2)+
+  geom_half_point(side = "r")+
+  ggtitle('Shannon Diversity Index (Evenness)')+
+  scale_fill_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"),
+                    labels = c("WT Low BA", "M2KO Low BA", "M2KO High BA"))+
+  scale_color_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+  ylim(c(0,6))+
+  facet_grid(~Tissue)+
+  theme_taxbar(
+           legend.position="right", 
+           strip.text.y = ggplot2::element_text(size = 12, face = "bold")
+         )+
+  xlab("Genotype X Bile Acid")+
+  guides(color = "none")+
+  stat_compare_means(comparisons = comparisons, method = "wilcox.test", label.y = c(4.5,5,5.5))
+ggsave("figures2/shannon.png")
+
+
+```
+comparisons = list(
+                      c("WTL","KOH"),              
+                      c("WTL","KOL"),
+                      c("KOL","KOH")
+                      ),
+
+
+```{r mp alpha chao, fig.height =6, fig.width = 10}
+# p2 <- mp_plot_alpha(mpse, .group = c("Bile_acid","Tissue"), .alpha=c("Chao1"))+
+#   ggtitle("Chao1 (Richness)")+
+#   scale_fill_manual(values=c("#4E79A7","#F28E2B"))+
+#   scale_color_manual(values=c("#4E79A7","#F28E2B"))
+# 
+# p2$layers[[2]]$aes_params$size <- 0.8
+# p2$layers[[2]]$aes_params$alpha <- 0.5
+#   
+# p2
+# ggsave('figures/chao.png')
+
+ggplot(mpse1, aes(x = BA_M2, y = Chao1, color = BA_M2, group = BA_M2))+
+  geom_half_violin(side = "l", aes(fill = BA_M2))+
+  geom_boxplot(position = position_nudge(x = 0.22), width=0.2)+
+  geom_half_point(side = "r")+
+  ggtitle('Chao1 (Richness)')+
+  scale_fill_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"),
+                    labels = c("WT Low BA", "M2KO Low BA", "M2KO High BA"))+
+  scale_color_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+  ylim(c(0,4000))+
+  facet_grid(~Tissue)+
+  theme_taxbar(
+           legend.position="right", 
+           strip.text.y = ggplot2::element_text(size = 12, face = "bold")
+         )+
+  xlab("Genotype X Bile Acid")+
+  guides(color = "none")+
+  stat_compare_means(comparisons = comparisons, method = "wilcox.test",label.y = c(2800,3100,3400))
+
+ggsave("figures2/chao.png")
+```
+
+```{r mp abund, fig.height = 8, fig.width = 20}
+
+
+p1 <- mpse1%>%
+  mp_plot_abundance(
+    .abundance=RelRareAbundanceBySample,
+    .group=c("BA_M2","Tissue"), 
+    topn = 14,
+    taxa.class = Rank2,
+    plot.group = TRUE
+    )+
+  #scale_fill_tableau("Tableau 20",direction = -1)+
+  ggtitle("Top 15 Phyla")
+
+p2 <- mpse1%>%
+  mp_plot_abundance(
+    .abundance=RelRareAbundanceBySample,
+    .group=c("BA_M2","Tissue"), 
+    topn = 14,
+    taxa.class = Rank6,
+    plot.group = TRUE
+    )+
+  scale_fill_tableau("Tableau 20",direction = -1)+
+  ggtitle("Top 15 Genera")
+
+# mpse1%>%filter(Sample == "PS36")%>%
+#   mp_plot_abundance(
+#     .abundance=RelRareAbundanceBySample,
+#     .group=c("BA_M2","Tissue"), 
+#     topn = 14,
+#     taxa.class = Rank6,
+#     
+#     )
+
+
+ggarrange(p1,p2)
+#p1
+ggsave("./figures2/top15.png", dpi =600)
+```
+
+```{r mp beta, fig.height = 10, fig.width = 10}
+
+
+mp_plot_dist(mpse1%>%filter(Tissue == "Distal Scraping"), .distmethod = "bray", .group = c("Mogat2"))%>%
+  set_scale_theme(
+          x = scale_size_continuous(
+                 
+                 guide = guide_legend(keywidth = 0.5, keyheight = 0.5)
+              ),
+          aes_var = bray
+       )
+mp_plot_dist(mpse1%>%filter(Tissue == "Proximal Scraping"), .distmethod = "bray", .group = c("Mogat2"))%>%
+  set_scale_theme(
+          x = scale_size_continuous(
+                 
+                 guide = guide_legend(keywidth = 0.5, keyheight = 0.5)
+              ),
+          aes_var = bray
+       )
+
+
+```
+
+```{r hclust, fig.height=25,fig.width=10}
+
+
+sample.clust <- mpse %>% mp_extract_internal_attr(name='SampleClust')
+
+ggtree(sample.clust) + 
+       geom_tippoint(aes(color=Mogat2)) +
+       geom_tiplab(as_ylab = TRUE) +
+       ggplot2::scale_x_continuous(expand=c(0, 0.01))
+```
+
+```{r mp nmds, fig.width = 10, fig.height = 6}
+mpse_nmds_dist = mpse2%>%
+  filter(Tissue %in% c("Distal Scraping","Distal Lumen"))%>%
+  mp_cal_nmds(.abundance=RareAbundance, distmethod = "bray")%>%
+  mp_adonis(.abundance=RareAbundance, .formula=~BA_M2+Tissue, distmethod="bray", permutations=9999, action="add")
+
+mp_plot_ord(mpse_nmds_dist, .ord = nmds, .group = BA_M2, .color = BA_M2, show.sample=TRUE,  ellipse = TRUE, show.adonis = TRUE)+
+  scale_fill_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"),
+                    labels = c("WT Low BA", "M2KO Low BA", "M2KO High BA"))+
+  scale_color_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+  ggtitle("NMDS Distal Scrape and Lumen")+
+  guides(color = "none")
+ggsave("./figures2/nmdsdist.png", dpi =600)
+  
+
+
+
+
+
+
+mpse_nmds_prox = mpse2%>%
+  filter(Tissue %in% c("Proximal Scraping","Proximal Lumen"))%>%
+  mp_cal_nmds(.abundance=RareAbundance, distmethod = "bray")%>%
+  mp_adonis(.abundance=RareAbundance, .formula=~BA_M2+Tissue, distmethod="bray", permutations=9999, action="add")
+
+
+mp_plot_ord(mpse_nmds_prox, .ord = nmds, .group = BA_M2, .color = BA_M2, show.sample=TRUE,  ellipse = TRUE, show.adonis = TRUE)+
+  scale_fill_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"),
+                    labels = c("WT Low BA", "M2KO Low BA", "M2KO High BA"))+
+  scale_color_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+  ggtitle("NMDS Proximal Scrape and Lumen")+
+  guides(color = "none")
+ggsave("./figures2/nmdsprox.png", dpi =600)
+
+
+
+
+
+
+mpse_nmds_cec = mpse2%>%
+  filter(Tissue %in% c("Cecum"))%>%
+  mp_cal_nmds(.abundance=RareAbundance, distmethod = "bray")%>%
+  mp_adonis(.abundance=RareAbundance, .formula=~BA_M2+Tissue, distmethod="bray", permutations=9999, action="add")
+
+
+mp_plot_ord(mpse_nmds_cec, .ord = nmds, .group = BA_M2, .color = BA_M2, show.sample=TRUE,  ellipse = TRUE, show.adonis = TRUE)+
+  scale_fill_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"),
+                    labels = c("WT Low BA", "M2KO Low BA", "M2KO High BA"))+
+  scale_color_manual(values=c("#4E79A7", "#59A14F", "#F28E2B"))+
+  ggtitle("NMDS Cecum")+
+  guides(color = "none")
+ggsave("./figures2/nmdscec.png", dpi =600)  
+```
+
+```{r diffres,}
+
+#length(unique(mp_extract_abundance(mpse2)$label))
+
+mpse_m2_diff_dist = mpse2%>%
+  mp_filter_taxa(.abundance = Abundance, min.abun=2)%>%
+  filter(Tissue %in% c("Distal Scraping","Distal Lumen"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = BA_M2,
+                   first.test.alpha = 0.5,
+                   second.test.alpha = 0.05)
+
+mpse_m2_diff_dist%>%
+  mp_plot_diff_manhattan(
+          .group = Sign_BA_M2,
+          taxa.class = c(Rank6)
+         )
+
+
+
+mpse_m2_diff_prox = mpse2%>%
+  mp_filter_taxa(.abundance = Abundance, min.abun=2)%>%
+  filter(Tissue %in% c("Proximal Scraping","Proximal Lumen"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = BA_M2,
+                   first.test.alpha = 0.5,
+                   second.test.alpha = 0.1)
+  
+mpse_m2_diff_prox%>%
+  mp_plot_diff_manhattan(
+          .group = Sign_BA_M2,
+          taxa.class = c(Rank6)
+         )
+
+
+
+
+mpse_m2_diff_cec = mpse2%>%
+  mp_filter_taxa(.abundance = Abundance, min.abun=2)%>%
+  filter(Tissue %in% c("Cecum"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = BA_M2,
+                   first.test.alpha = 0.7,
+                   second.test.alpha = 0.5)
+  
+mpse_m2_diff_cec%>%
+  mp_plot_diff_manhattan(
+          .group = Sign_BA_M2,
+          taxa.class = c(Rank6)
+
+         )
+
+```
+
+```{r manhattan, fig.width=12,fig.height=8}
+mpse_m2_diff %>%
+  mp_plot_diff_manhattan(
+       .group = Sign_Bile_acid,
+       .y = fdr,
+       .size = 4,
+       taxa.class = Rank6,
+       anno.taxa.class = Rank2
+    )
+ggsave("./figures/manhattan_all.png", dpi=600)
+```
+
+```{r cladogram}
+
+#taxa.tree = mpse%>%mp_extract_tree(type = "taxatree")
+
+
+
+mpse_m2_diff%>%
+  mp_plot_diff_res(
+    layot = "radial",
+    pwidth.abun=0.1,
+    label.size = 0.01,
+    taxa.class = Rank2,
+    group.abun = TRUE,
+    removeUnknown = TRUE,
+    tiplab.linetype = 1,
+    pwidth.effsize = 0.05,
+    tiplab.size = 0.1,
+    sample.num = 50,
+    
+  )
+
+ggsave('clade.png')
+
+#mp_plot_diff_cladogram(mpse_m2_diff)
+```
+
+```{r tree, fig.height=14, fig.width=15}
+
+taxa.tree <- mpse_m2_diff %>%
+  mp_extract_taxatree(tip.level = "Rank6")
+
+
+ggtree(taxa.tree, layout="radial", size = 0.1)+
+  geom_point(
+        data = td_filter(!isTip),
+        fill="white",
+        size=0.7,
+        shape=21
+      )+
+  geom_hilight(
+        data = td_filter(nodeClass == "Rank2"),
+        mapping = aes(node = node, fill = label)
+      )+
+  ggnewscale::new_scale("fill")+
+  geom_fruit(
+         data = td_unnest(RareAbundanceBySample),
+         geom = geom_star(),
+         mapping = aes(
+                      x = fct_reorder2(Sample, RelRareAbundanceBySample, Bile_acid),
+                      size = RelRareAbundanceBySample,
+                      fill = Bile_acid,
+                      subset = RelRareAbundanceBySample > 0
+                   ),
+         starshape = 13,
+         starstroke = 0.01,
+         offset = 0.04,
+         pwidth = 0.8,
+         grid.params = list(linetype=2)
+      )+
+  scale_size_continuous(
+         name="Relative Abundance (%)",
+         range = c(.5, 3)
+      )+
+  scale_fill_manual(values=c("#4E79A7","#F28E2B"))+ 
+  geom_tiplab(size=2, offset=11)+
+  ggnewscale::new_scale("fill") +
+      geom_fruit(
+         geom = geom_col,
+         mapping = aes(
+                       x = LDAmean,
+                       fill = Sign_Bile_acid,
+                       subset = !is.na(LDAmean)
+                       ),
+         width = 0.8,
+         orientation = "y",
+         offset = 0.2,
+         pwidth = 0.7,
+         axis.params = list(axis = "x",
+                            title = "Log10(LDA)",
+                            title.height = 0.01,
+                            title.size = 1,
+                            text.size = 0.8,
+                            vjust = 2),
+         grid.params = list(linetype = 2)
+      )+
+  ggnewscale::new_scale("size") +
+      geom_point(
+         data=td_filter(!is.na(Sign_Bile_acid)),
+         mapping = aes(size = -log10(fdr),
+                       fill = Sign_Bile_acid,
+                       ),
+         shape = 21,
+      )+
+  scale_size_continuous(range=c(1, 3)) +
+  scale_fill_manual(values=c("#F28E2B","#4E79A7"))
+
+ggsave('mainplot2.png',dpi=600)
+
+
+```
+
+```{r manhattans}
+mpse_DA_PS = mpse_no1s%>%
+  filter(Tissue %in% c("Proximal Scraping","Proximal Lumen"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.01,
+                   strict = FALSE,
+                   p.adjust = NULL,
+                   filter.p = "pvalue")
+
+mpse_DA_PS%>%
+mp_plot_diff_manhattan(
+       .group = Sign_Bile_acid,
+       .y = pvalue ,
+       .size = 2,
+       taxa.class = Rank6,
+       anno.taxa.class = Rank2
+    )+
+  ggtitle("Proximal")
+ggsave("./figures/manhattan_prox.png", dpi = 600)
+
+# mpse_DA_PS%>%
+#   mp_plot_diff_boxplot(
+#           .group = Bile_acid,
+#           taxa.class = c(Rank6)
+#             
+#          )%>%
+#   set_diff_boxplot_color(values = c("#F28E2B","#4E79A7"))+
+#   ggtitle("Proximal")
+
+
+mpse_DA_DS = mpse_no1s%>%
+  filter(Tissue %in% c("Distal Scraping","Distal Lumen"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.01,
+                   strict = FALSE,
+                   p.adjust = NULL,
+                   filter.p = "pvalue")
+
+mpse_DA_DS%>%
+mp_plot_diff_manhattan(
+       .group = Sign_Bile_acid,
+       .y = pvalue ,
+       .size = 2,
+       taxa.class = Rank6,
+       anno.taxa.class = Rank2
+    )+
+  ggtitle("Distal")
+ggsave("./figures/manhattan_distal.png", dpi = 600)
+
+# mpse_DA_DS%>%
+#   mp_plot_diff_boxplot(
+#           .group = Bile_acid,
+#           taxa.class = c(Rank6)
+#             
+#          )%>%
+#   set_diff_boxplot_color(values = c("#F28E2B","#4E79A7"))+
+#   ggtitle("Distal")
+
+
+
+# mpse_m2_diff%>%
+#   mp_plot_diff_manhattan(
+#        .group = Sign_Bile_acid,
+#        .y = fdr,
+#        .size = 2,
+#        taxa.class = Rank6,
+#        anno.taxa.class = Rank2
+#     )+
+#   ggtitle("pooled")
+
+
+```
+
+```{r other manhatans}
+mpse_DA_DL = mpse_no1s%>%
+  filter(Tissue == "Distal Lumen")%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.7)
+
+mpse_DA_DL%>%
+mp_plot_diff_manhattan(
+       .group = Sign_Bile_acid,
+       .y = pvalue,
+       .size = 1,
+       taxa.class = Rank6,
+       anno.taxa.class = Rank2
+    )
+
+
+mpse_DA_PL = mpse_no1s%>%
+  filter(Tissue == "Proximal Lumen")%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.7)
+
+mpse_DA_PL%>%
+mp_plot_diff_manhattan(
+       .group = Sign_Bile_acid,
+       .y = pvalue,
+       .size = 1,
+       taxa.class = Rank6,
+       anno.taxa.class = Rank2
+    )
+
+
+mpse_DA_CE = mpse_no1s%>%
+  filter(Tissue == "Cecum")%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.6)
+
+mpse_DA_CE%>%
+mp_plot_diff_manhattan(
+       .group = Sign_Bile_acid,
+       .y = fdr,
+       .size = ,
+       taxa.class = Rank6,
+       anno.taxa.class = Rank2
+    )+
+  theme(axis.text=element_text(size=5),
+        )
+ggsave("figures/Cecum.png", dpi = 600)
+
+```
+
+```{r proximal radial, fig.height=14, fig.width=15}
+
+mpse_DA_PS = mpse_no1s%>%
+  #filter(Tissue %in% c("Proximal Scraping","Proximal Lumen"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.1,)
+
+
+
+mpse_DA_PS.tree = mpse_DA_PS%>%
+  mp_extract_taxatree(tip.level = "Rank6")
+  
+
+
+ggtree(mpse_DA_PS.tree, layout="radial", size = 0.1)+
+  geom_point(
+        data = td_filter(!isTip),
+        fill="white",
+        size=0.7,
+        shape=21
+      )+
+  geom_hilight(
+        data = td_filter(nodeClass == "Rank2"),
+        mapping = aes(node = node, fill = label)
+      )+
+  ggnewscale::new_scale("fill")+
+  geom_fruit(
+         data = td_unnest(RareAbundanceBySample),
+         geom = geom_star,
+         mapping = aes(
+                       x = fct_reorder2(Sample, RelRareAbundanceBySample, Bile_acid),
+                       size = RelRareAbundanceBySample,
+                       fill = Bile_acid,
+                       subset = RelRareAbundanceBySample > 0
+                   ),
+         starshape = 13,
+         starstroke = 0.01,
+         offset = 0.04,
+         pwidth = 0.8,
+         grid.params = list(linetype=2)
+      )+
+  scale_size_continuous(
+         name="Relative Abundance (%)",
+         range = c(.2, 2)
+      )+
+  scale_fill_manual(values=c("#4E79A7","#F28E2B"))+ 
+  geom_tiplab(size=2, offset=11)+
+  ggnewscale::new_scale("fill") +
+      geom_fruit(
+         geom = geom_col,
+         mapping = aes(
+                       x = LDAmean,
+                       fill = Sign_Bile_acid,
+                       subset = !is.na(LDAmean)
+                       ),
+         width = 0.8,
+         orientation = "y",
+         offset = 0.2,
+         pwidth = 0.7,
+         axis.params = list(axis = "x",
+                            title = "Log10(LDA)",
+                            title.height = 0.01,
+                            title.size = 1,
+                            text.size = 0.8,
+                            vjust = 2),
+         grid.params = list(linetype = 2)
+      )+
+  ggnewscale::new_scale("size") +
+      geom_point(
+         data=td_filter(!is.na(Sign_Bile_acid)),
+         mapping = aes(size = -log10(fdr),
+                       fill = Sign_Bile_acid,
+                       ),
+         shape = 21,
+      )+
+  scale_size_continuous(range=c(1, 3)) +
+  scale_fill_manual(values=c("#F28E2B","#4E79A7"))+
+  ggtitle("Proximal")
+
+ggsave('figures/Prox_radial.png',dpi = 600)
+```
+
+```{r radial distal,fig.height=14, fig.width=15}
+mpse_DA_DS = mpse_no1s%>%
+  filter(Tissue %in% c("Distal Scraping","Distal Lumen"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.1)
+
+mpse_DA_DS.tree = mpse_DA_DS%>%
+  mp_extract_taxatree(tip.level = "Rank6")
+  
+
+
+ggtree(mpse_DA_DS.tree, layout="radial", size = 0.1)+
+  geom_point(
+        data = td_filter(!isTip),
+        fill="white",
+        size=0.7,
+        shape=21
+      )+
+  geom_hilight(
+        data = td_filter(nodeClass == "Rank2"),
+        mapping = aes(node = node, fill = label)
+      )+
+  ggnewscale::new_scale("fill")+
+  geom_fruit(
+         data = td_unnest(RareAbundanceBySample),
+         geom = geom_star,
+         mapping = aes(
+                       x = fct_reorder2(Sample, RelRareAbundanceBySample, Bile_acid),
+                       size = RelRareAbundanceBySample,
+                       fill = Bile_acid,
+                       subset = RelRareAbundanceBySample > 0
+                   ),
+         starshape = 13,
+         starstroke = 0.01,
+         offset = 0.04,
+         pwidth = 0.8,
+         grid.params = list(linetype=2)
+      )+
+  scale_size_continuous(
+         name="Relative Abundance (%)",
+         range = c(.3, 2)
+      )+
+  scale_fill_manual(values=c("#4E79A7","#F28E2B"))+ 
+  geom_tiplab(size=2, offset=11)+
+  ggnewscale::new_scale("fill")+
+      geom_fruit(
+         geom = geom_col,
+         mapping = aes(
+                       x = LDAmean,
+                       fill = Sign_Bile_acid,
+                       subset = !is.na(LDAmean)
+                       ),
+         width = 0.8,
+         orientation = "y",
+         offset = 0.2,
+         pwidth = 0.7,
+         axis.params = list(axis = "x",
+                            title = "Log10(LDA)",
+                            title.height = 0.01,
+                            title.size = 1,
+                            text.size = 0.8,
+                            vjust = 2),
+         grid.params = list(linetype = 2)
+      )+
+  ggnewscale::new_scale("size") +
+      geom_point(
+         data=td_filter(!is.na(Sign_Bile_acid)),
+         mapping = aes(size = -log10(fdr),
+                       fill = Sign_Bile_acid,
+                       ),
+         shape = 21,
+      )+
+  scale_size_continuous(range=c(1, 3)) +
+  scale_fill_manual(values=c("#F28E2B","#4E79A7"))+
+  ggtitle("Distal")
+
+ggsave('figures/Distal_radial.png', dpi = 600)
+```
+
+```{r cecum radial}
+mpse_DA_CE = mpse_no1s%>%
+  filter(Tissue %in% c("Cecum"))%>%
+  mp_diff_analysis(.abundance = RelRareAbundanceBySample,
+                   .group = Bile_acid,
+                   first.test.alpha = 0.2)
+
+mpse_DA_CE.tree = mpse_DA_CE%>%
+  mp_extract_taxatree(tip.level = "Rank6")
+  
+
+
+ggtree(mpse_DA_CE.tree, layout="radial", size = 0.1)+
+  geom_point(
+        data = td_filter(!isTip),
+        fill="white",
+        size=0.7,
+        shape=21
+      )+
+  geom_hilight(
+        data = td_filter(nodeClass == "Rank2"),
+        mapping = aes(node = node, fill = label)
+      )+
+  ggnewscale::new_scale("fill")+
+  geom_fruit(
+         data = td_unnest(RareAbundanceBySample),
+         geom = geom_star,
+         mapping = aes(
+                       x = fct_reorder2(Sample, RelRareAbundanceBySample, Bile_acid),
+                       size = RelRareAbundanceBySample,
+                       fill = Bile_acid,
+                       subset = RelRareAbundanceBySample > 0
+                   ),
+         starshape = 13,
+         starstroke = 0.01,
+         offset = 0.04,
+         pwidth = 0.8,
+         grid.params = list(linetype=2)
+      )+
+  scale_size_continuous(
+         name="Relative Abundance (%)",
+         range = c(.3, 2)
+      )+
+  scale_fill_manual(values=c("#4E79A7","#F28E2B"))+ 
+  geom_tiplab(size=2, offset=11)+
+  ggnewscale::new_scale("fill")+
+      geom_fruit(
+         geom = geom_col,
+         mapping = aes(
+                       x = LDAmean,
+                       fill = Sign_Bile_acid,
+                       subset = !is.na(LDAmean)
+                       ),
+         width = 0.8,
+         orientation = "y",
+         offset = 0.2,
+         pwidth = 0.7,
+         axis.params = list(axis = "x",
+                            title = "Log10(LDA)",
+                            title.height = 0.01,
+                            title.size = 1,
+                            text.size = 0.8,
+                            vjust = 2),
+         grid.params = list(linetype = 2)
+      )+
+  ggnewscale::new_scale("size") +
+      geom_point(
+         data=td_filter(!is.na(Sign_Bile_acid)),
+         mapping = aes(size = -log10(fdr),
+                       fill = Sign_Bile_acid,
+                       ),
+         shape = 21,
+      )+
+  scale_size_continuous(range=c(1, 3)) +
+  scale_fill_manual(values=c("#F28E2B","#4E79A7"))+
+  ggtitle("Cecum")
+
+ggsave('figures/Cecum_radial.png', dpi = 600)
+```
+
+
+```{r individual abundances}
+# mpse_no1s%>%
+#   filter(Tissue %in% c("Distal_Scraping","Distal_lumen"))%>%
+
+
+
+
+individual_ps = nosingleton_ps%>%
+  
+  rarefy_even_depth(sample.size = 10346, trimOTUs = TRUE, rngseed = 123)%>%  
+  tax_glom("Rank6")%>%
+  transform_sample_counts(function(x) {x/sum(x)*100})%>%
+  psmelt()%>%
+  mutate(Bile_acid = fct_relevel(Bile_acid, c("Low","High")))%>%
+  mutate(Tissue = fct_recode(Tissue, 
+                           "Proximal Lumen" = "Proximal_lumen",
+                           "Proximal Scraping" = "Prox_Scraping",
+                           "Distal Lumen" = "Distal_lumen",
+                           "Distal Scraping" = "Distal_Scraping",
+                           "Cecum" = "Cecum"))%>%
+  #filter(Tissue != "Cecum")%>%
+  mutate(Tissue_section = case_when(
+    
+    Tissue %in% c("Proximal Scraping","Proximal Lumen") ~ "proximal",
+    Tissue %in% c("Distal Scraping","Distal Lumen") ~ "distal",
+    )
+  )%>%
+  mutate()
+  
+
+
+
+individual_ps_candidatus = individual_ps%>%
+  filter(Rank6 == "Candidatus_Arthromitus")
+
+individual_ps_turicibacter = individual_ps%>%
+  filter(Rank6 == "Turicibacter")
+
+individual_ps_muribaculaceae = individual_ps%>%
+  filter(Rank6 == "Muribaculaceae_ge")
+
+individual_ps_olsonella = individual_ps%>%
+  filter(Rank6 == "Olsenella")
+
+individual_ps_DNF00809 = individual_ps%>%
+  filter(Rank6 == "DNF00809")
+
+individual_ps_eggerthellaceae = individual_ps%>%
+  filter(Rank6 == "Eggerthellaceae_unclassified")
+
+individual_ps_parasutterella = individual_ps%>%
+  filter(Rank6 == "Parasutterella")
+
+individual_ps_bacteroides = individual_ps%>%
+  filter(Rank6 == "Bacteroides")
+```
+
+```{r individual abundance plots, fig.height= 10, fig.width=14}
+
+comparisons = list(c("WTL","KOH"), c("WTL", "KOL"), c("KOL", "KOH"))
+
+plotabundbox <- function(data, name){
+  p1<-ggplot(data, aes(x=BA_M2, y = Abundance, color = BA_M2, ))+
+  geom_half_violin(side = "l", aes(fill = BA_M2))+
+  
+  geom_boxplot(position = position_nudge(x = 0.22), width=0.2)+
+  geom_half_point(side = "r")+
+      scale_x_discrete(limits = c("WTL", "KOL", "KOH"))+
+  scale_color_manual(values=c("#F28E2B", "#59A14F", "#4E79A7"))+
+  scale_fill_manual(values=c("#F28E2B", "#59A14F", "#4E79A7"))+
+  ylab("Relative Abundance %")+
+  xlab("Plasma Bile Acid")+
+  ggtitle(name)+
+  facet_grid(geno~Tissue)+
+  stat_compare_means(comparisons = comparisons ,aes(label = paste0("p = ", after_stat(p.format))))+
+  theme(legend.position = "none")
+
+  
+  return(p1)
+}
+
+p1<- plotabundbox(individual_ps_candidatus, "Candidatus Arthromitus")
+
+p2<- plotabundbox(individual_ps_turicibacter, "Turicibacter")
+
+p3<- plotabundbox(individual_ps_muribaculaceae, "Muribaculaculaceae_ge")
+
+p4<- plotabundbox(individual_ps_olsonella, "Olsenella")
+
+p5<- plotabundbox(individual_ps_DNF00809, "DNF00809")
+
+p6<- plotabundbox(individual_ps_eggerthellaceae, "eggerthellaceae")
+
+p7<- plotabundbox(individual_ps_parasutterella, "Parasutterella")
+
+p8<- plotabundbox(individual_ps_bacteroides, "Bacteroides")
+
+
+
+
+
+#ggarrange(p1,p2,p3,p4,p5,p6,p7, p8, nrow = 1, ncol = 8)
+#ggsave('figures2/individualabundances.png',dpi = 300)
+
+p1
+ggsave('figures2/arthromitus.png',dpi = 300)
+
+p2
+ggsave('figures2/turicibacter.png',dpi = 300)
+
+p3
+ggsave('figures2/muribac.png',dpi = 300)
+
+p4
+ggsave('figures2/olsenella.png',dpi = 300)
+
+p5
+ggsave('figures2/dnf.png',dpi = 300)
+
+p6
+ggsave('figures2/egg.png',dpi = 300)
+
+p7
+ggsave('figures2/paras.png',dpi = 300)
+
+p8
+ggsave('figures2/bacteroides.png',dpi = 300)
+```
+
+```{r turicibacter otu}
+
+turici_ps = nosingleton_ps%>%
+  transform_sample_counts(function(x) {x/sum(x)*100})%>%
+  psmelt()%>%
+  filter(Rank6 == "Bacteroides")%>%
+  #filter(OTU == "Otu00635")%>%
+  mutate(Bile_acid = fct_relevel(Bile_acid, c("Low","High")))%>%
+  mutate(Tissue = fct_recode(Tissue, 
+                           "Proximal Lumen" = "Proximal_lumen",
+                           "Proximal Scraping" = "Prox_Scraping",
+                           "Distal Lumen" = "Distal_lumen",
+                           "Distal Scraping" = "Distal_Scraping",
+                           "Cecum" = "Cecum"))%>%
+  filter(Tissue != "Cecum")%>%
+  mutate(Tissue_section = case_when(
+    
+    Tissue %in% c("Proximal Scraping","Proximal Lumen") ~ "proximal",
+    Tissue %in% c("Distal Scraping","Distal Lumen") ~ "distal",
+    )
+  )
+
+
+ggplot(turici_ps, aes(x = Bile_acid, y = Abundance, fill = Bile_acid))+
+  geom_boxplot()+
+  facet_grid(Tissue_section~OTU)
+
+
+turici_ps%>%
+  filter(Abundance != 0)%>%
+  filter(OTU != "Otu00015")
+
+nosingleton_ps@tax_table%>%
+  as.data.frame()
+```
+
+
+

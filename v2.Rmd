@@ -1,0 +1,138 @@
+---
+title: "markdownv2"
+author: "Andrew Tu"
+date: "2023-07-03"
+output: html_document
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#BiocManager::install(c("phyloseq",'DESeq2'))
+library(tidyverse)
+library(dplyr)
+library(ape)
+library(DESeq2)
+#library(lme4)
+library(miLineage)
+library(phangorn)
+library(phyloseq)
+library(vegan)
+library(VennDiagram)
+library(ggpubr)
+library(MicrobiotaProcess)
+library(gghalves)
+library(ggh4x)
+library(ggalluvial)
+library(corrr)
+library(ggthemes)
+library(ggtree)
+library(ggtreeExtra)
+library(ggstar)
+library(randomForest)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r 0.005, fig.height= 4, fig.width=10}
+mothur_ps005 = merge_phyloseq(
+  import_mothur(
+    mothur_shared_file = "stability.final.asv.shared", 
+    mothur_constaxonomy_file = "stability.final.asv.list"),
+    sample_data(read_csv("metadata.csv")%>%column_to_rownames("Sample_ID"))
+  )
+
+nosingleton_ps005 = mothur_ps005%>%
+  filter_taxa(function(x) { sum(x>0) > 1},prune = TRUE)
+
+
+
+turici_ps005 = nosingleton_ps005%>%
+  transform_sample_counts(function(x) {x/sum(x)*100})%>%
+  psmelt()%>%
+  filter(Rank6 == "Turicibacter")%>%
+  #filter(OTU == "Otu00635")%>%
+  mutate(Bile_acid = fct_relevel(Bile_acid, c("Low","High")))%>%
+  mutate(Tissue = fct_recode(Tissue, 
+                           "Proximal Lumen" = "Proximal_lumen",
+                           "Proximal Scraping" = "Prox_Scraping",
+                           "Distal Lumen" = "Distal_lumen",
+                           "Distal Scraping" = "Distal_Scraping",
+                           "Cecum" = "Cecum"))%>%
+  filter(Tissue != "Cecum")%>%
+  mutate(Tissue_section = case_when(
+    
+    Tissue %in% c("Proximal Scraping","Proximal Lumen") ~ "proximal",
+    Tissue %in% c("Distal Scraping","Distal Lumen") ~ "distal",
+    )
+  )
+
+
+ggplot(turici_ps005, aes(x = Bile_acid, y = Abundance, fill = Bile_acid))+
+  geom_boxplot()+
+  facet_grid(Tissue_section~OTU)+
+  ggtitle("OTU cutoff 0.5%")
+ggsave("./figures/turici005.png")
+
+turici_ps005%>%
+  filter(Abundance != 0)%>%
+  filter(OTU != "Otu000010")
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE, fig.height= 4, fig.width=20}
+mothur_ps001 = merge_phyloseq(
+  import_mothur(
+    mothur_shared_file = "stability.final.opti_mcc.0.005.subsample.shared", 
+    mothur_constaxonomy_file = "stability.final.opti_mcc.0.005.cons.taxonomy"),
+    sample_data(read_csv("metadata.csv")%>%column_to_rownames("Sample_ID"))
+  )
+test = mothur_ps001@tax_table%>%
+  as.data.frame()
+
+
+ # filter_taxa(function(x) { sum(x>0) > 1},prune = TRUE)
+nosingleton_ps01 = prune_taxa(taxa_sums(mothur_ps001) > 1, mothur_ps001)
+
+
+turici_ps01 = nosingleton_ps01%>%
+  transform_sample_counts(function(x) {x/sum(x)*100})%>%
+  psmelt()%>%
+  filter(Rank6 == "Bacteroides")%>%
+  #filter(OTU == "Otu00635")%>%
+  mutate(Bile_acid = fct_relevel(Bile_acid, c("Low","High")))%>%
+  mutate(Tissue = fct_recode(Tissue,
+                           "Proximal Lumen" = "Proximal_lumen",
+                           "Proximal Scraping" = "Prox_Scraping",
+                           "Distal Lumen" = "Distal_lumen",
+                           "Distal Scraping" = "Distal_Scraping",
+                           "Cecum" = "Cecum"))%>%
+  filter(Tissue != "Cecum")%>%
+  mutate(Tissue_section = case_when(
+
+    Tissue %in% c("Proximal Scraping","Proximal Lumen") ~ "proximal",
+    Tissue %in% c("Distal Scraping","Distal Lumen") ~ "distal",
+    )
+  )
+
+
+ggplot(turici_ps01, aes(x = Bile_acid, y = Abundance, fill = Bile_acid))+
+  geom_boxplot()+
+  facet_grid(Tissue_section~OTU)+
+  ggtitle("OTU cutoff 1%")
+#ggsave("./figures/turi01.png", dpi = 600)
+
+
+turici_ps01%>%
+  filter(Abundance != 0)%>%
+  filter(OTU != "Otu00010")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
